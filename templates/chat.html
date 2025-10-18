@@ -1,0 +1,91 @@
+<html>
+<head>
+  <title>Synthetic Reason — Cognitive Dashboard</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: Arial; display: grid; grid-template-columns: 35% 35% 30%; height: 100vh; margin: 0; }
+    #chat { border-right: 2px solid #ddd; padding: 20px; overflow-y: auto; }
+    #graph { border-right: 2px solid #ddd; position: relative; }
+    #dashboard { padding: 15px; overflow-y: auto; background: #fafafa; }
+    h2, h3 { margin-top: 0; }
+    .msg { margin: 8px 0; }
+    .user { color: #00796b; }
+    .bot { color: #333; white-space: pre-wrap; }
+    input { width: 80%; padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
+    button { padding: 8px 14px; background: #00796b; color: white; border: none; border-radius: 8px; margin-left: 5px; }
+    svg { width: 100%; height: 100%; }
+    .fact, .rule { padding: 4px; border-bottom: 1px solid #ddd; font-size: 14px; }
+    .status { font-size: 13px; color: #555; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="chat">
+    <h2>🤖 Synthetic Reason (GPT-4)</h2>
+    <div id="messages"></div>
+    <input id="userInput" placeholder="Type..." autofocus>
+    <button onclick="sendMsg()">Send</button>
+  </div>
+
+  <div id="graph"><svg id="graphviz"></svg></div>
+
+  <div id="dashboard">
+    <h2>🧩 Memory Dashboard</h2>
+    <div><b>Tension:</b> <span id="tension">—</span></div>
+    <div class="status" id="syncStatus">Dataset Sync: —</div>
+    <h3>Facts</h3>
+    <div id="facts"></div>
+    <h3>Rules</h3>
+    <div id="rules"></div>
+  </div>
+
+  <script>
+  async function sendMsg(){
+    const msg=document.getElementById('userInput').value;
+    if(!msg)return;
+    const chat=document.getElementById('messages');
+    chat.innerHTML+=`<div class='msg user'><b>You:</b> ${msg}</div>`;
+    const res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:msg})});
+    const data=await res.json();
+    chat.innerHTML+=`<div class='msg bot'><b>Bot:</b> ${data.reply}</div>`;
+    document.getElementById('userInput').value='';
+    drawGraph();updateDashboard();
+  }
+
+  async function drawGraph(){
+    const res=await fetch('/graph');
+    const data=await res.json();
+    const svg=d3.select('#graphviz');svg.selectAll('*').remove();
+    const width=document.getElementById('graph').clientWidth;
+    const height=document.getElementById('graph').clientHeight;
+    const linkForce=d3.forceLink(data.links).id(d=>d.id).distance(100);
+    const sim=d3.forceSimulation(data.nodes).force('link',linkForce)
+      .force('charge',d3.forceManyBody().strength(-200))
+      .force('center',d3.forceCenter(width/2,height/2));
+    const link=svg.append('g').selectAll('line')
+      .data(data.links).enter().append('line').attr('stroke','#999').attr('stroke-width',2);
+    const node=svg.append('g').selectAll('circle')
+      .data(data.nodes).enter().append('circle').attr('r',15).attr('fill','#00796b');
+    const text=svg.append('g').selectAll('text.node')
+      .data(data.nodes).enter().append('text').text(d=>d.id)
+      .attr('text-anchor','middle').attr('dy',4).style('fill','white');
+    sim.on('tick',()=>{
+      link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+          .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+      node.attr('cx',d=>d.x).attr('cy',d=>d.y);
+      text.attr('x',d=>d.x).attr('y',d=>d.y);
+    });
+  }
+
+  async function updateDashboard(){
+    const res=await fetch('/dashboard');
+    const data=await res.json();
+    document.getElementById('tension').innerText=data.tension;
+    document.getElementById('syncStatus').innerText="Dataset Sync: "+data.sync;
+    document.getElementById('facts').innerHTML=data.facts.map(f=>`<div class='fact'>${f}</div>`).join('');
+    document.getElementById('rules').innerHTML=data.rules.map(r=>`<div class='rule'>${r}</div>`).join('');
+  }
+
+  drawGraph();updateDashboard();
+  </script>
+</body>
+</html>
