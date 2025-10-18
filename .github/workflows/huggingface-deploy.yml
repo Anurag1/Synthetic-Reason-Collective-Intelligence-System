@@ -19,15 +19,61 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install huggingface_hub
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade huggingface_hub
 
       - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
         run: |
-          python -m huggingface_hub repo upload \
-            ./ \
-            Anurag1/synthetic-reason-collective \
-            --repo-type space \
-            --token $HF_TOKEN \
-            --commit-message "Auto-deploy from GitHub: $GITHUB_SHA"
+          python - <<'PY'
+          import os
+          import shutil
+          import tempfile
+          from huggingface_hub import HfApi, upload_folder
+
+          token = os.environ.get("HF_TOKEN")
+          if not token:
+              raise SystemExit("HF_TOKEN is not set. Add it to repository secrets as HF_TOKEN with repo and write scopes for Spaces.")
+
+          repo_id = "Anurag1/synthetic-reason-collective"
+          api = HfApi(token=token)
+
+          # Create the Space repo if it doesn't exist
+          try:
+              api.create_repo(repo_id=repo_id, repo_type="space", exist_ok=True)
+              print(f"Created or verified repo {repo_id}")
+          except Exception as e:
+              print("Warning creating repo (may already exist):", e)
+
+          # Prepare a temp directory excluding VCS and CI metadata
+          tmpdir = tempfile.mkdtemp()
+          exclude_dirs = {".git", ".github", "venv", ".venv", "__pycache__"}
+
+          for root, dirs, files in os.walk('.', topdown=True):
+              # filter out excluded directories in-place so os.walk won't traverse them
+              dirs[:] = [d for d in dirs if d not in exclude_dirs]
+              for fname in files:
+                  # skip typical unwanted files
+                  if fname.endswith(('.pyc', '.pkl')):
+                      continue
+                  src_path = os.path.join(root, fname)
+                  rel_path = os.path.relpath(src_path, '.')
+                  dst_path = os.path.join(tmpdir, rel_path)
+                  os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                  shutil.copy2(src_path, dst_path)
+
+          # Upload the prepared folder to the Space
+          upload_folder(
+              folder_path=tmpdir,
+              path_in_repo="",
+              repo_id=repo_id,
+              repo_type="space",
+              token=token,
+              commit_message=f"Auto-deploy from GitHub: {os.environ.get('GITHUB_SHA')}"
+          )
+
+          shutil.rmtree(tmpdir)
+          print("Upload complete")
+          PY
